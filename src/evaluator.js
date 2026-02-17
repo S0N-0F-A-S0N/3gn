@@ -54,10 +54,10 @@ function readValue(_node, idx) {
 }
 
 function applyNode(f, inputs) {
-  return (node, sidx) =>
+  return (node, sidx, cache) =>
     f(
       sidx,
-      inputs.map((idx) => _evaluateNode(readValue(node, idx)))
+      inputs.map((idx) => _evaluateNode(readValue(node, idx), cache))
     );
 }
 
@@ -66,7 +66,7 @@ const nodeTypeToFn = {
     return n._index;
   },
   // FIXME: not implemented yet
-  SET_MATERIAL: (node, sidx) => _evaluateNode(readValue(node, 0)),
+  SET_MATERIAL: (node, sidx, cache) => _evaluateNode(readValue(node, 0), cache),
 
   GROUP_INPUT: (node, sidx) => n.groupInput(sidx, node.outputs[0].value),
 
@@ -81,14 +81,14 @@ const nodeTypeToFn = {
   INSTANCE_ON_POINTS: applyNode(n.instanceOnPoints, [0, 2, 5, 6]),
   POINTS: applyNode(n.points, [0, 1, 2]),
 
-  VECT_MATH: (node) =>
-    _evaluateNode([{ ...node, type: `VECT_MATH/${node.operation}` }, 0]),
+  VECT_MATH: (node, sidx, cache) =>
+    _evaluateNode([{ ...node, type: `VECT_MATH/${node.operation}` }, 0], cache),
   "VECT_MATH/ADD": applyNode(n.vecAdd, [0, 1]),
   "VECT_MATH/SUBTRACT": applyNode(n.vecSubtract, [0, 1]),
   "VECT_MATH/DIVIDE": applyNode(n.vecDivide, [0, 1]),
 
-  MATH: (node) =>
-    _evaluateNode([{ ...node, type: `MATH/${node.operation}` }, 0]),
+  MATH: (node, sidx, cache) =>
+    _evaluateNode([{ ...node, type: `MATH/${node.operation}` }, 0], cache),
   "MATH/MULTIPLY": applyNode(n.multiply, [0, 1]),
   "MATH/MULTIPLY_ADD": applyNode(n.multiplyAdd, [0, 1, 2]),
   "MATH/DIVIDE": applyNode(n.divide, [0, 1]),
@@ -124,41 +124,64 @@ const nodeTypeToFn = {
   MAP_RANGE: applyNode(n.mapRange, [1, 2, 3, 4, 0]),
 
   // nodes with multiple inputs per socket
-  JOIN_GEOMETRY: (node) =>
-    n.joinGeometry(readValue(node, 0).map((n) => _evaluateNode(n))),
+  JOIN_GEOMETRY: (node, sidx, cache) =>
+    n.joinGeometry(readValue(node, 0).map((n) => _evaluateNode(n, cache))),
 };
 
-function _evaluateNode([node, sidx]) {
+function _evaluateNode([node, sidx], cache) {
+  // Check cache to avoid re-evaluating shared nodes
+  if (cache) {
+    const key = `${node.id}:${sidx}`;
+    if (cache.has(key)) {
+      return cache.get(key);
+    }
+  }
+
   const nodeFn = nodeTypeToFn[node.type];
 
+  let result;
   if (nodeFn === undefined) {
     console.log(node);
     throw new Error(`no evaluator for node type ${node.type}`);
   } else {
     // console.log(node);
-    return nodeFn(node, sidx);
+    result = nodeFn(node, sidx, cache);
   }
+
+  // Cache the result for future use
+  if (cache) {
+    const key = `${node.id}:${sidx}`;
+    cache.set(key, result);
+  }
+
+  return result;
 }
 
-export function evaluateNode(node) {
+export function evaluateNode(node, cache) {
   const indexNode = findNodesByType("INDEX", node)[0];
   if (indexNode) {
     indexNode._value = n._index;
   }
 
-  return _evaluateNode([node, 0]);
+  if (!cache) {
+      cache = new Map();
+  }
+
+  return _evaluateNode([node, 0], cache);
 }
 
 export function buildNodes(_nodes) {
   const nodes = enrichNodes(_nodes);
+  const cache = new Map();
+
   // graph root (geo nodes output node)
   const out = nodes.find((n) => n.type === "GROUP_OUTPUT");
   let viewer = nodes.find((n) => n.type === "VIEWER");
-  viewer = viewer ? evaluateNode(viewer).compute() : null;
+  viewer = viewer ? evaluateNode(viewer, cache).compute() : null;
 
   if (out) {
     // hydrate graph
-    const gn = evaluateNode(out);
+    const gn = evaluateNode(out, cache);
 
     // execute graph
     const geometry = gn.compute();
