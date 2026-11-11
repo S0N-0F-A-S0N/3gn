@@ -128,7 +128,17 @@ const nodeTypeToFn = {
     n.joinGeometry(readValue(node, 0).map((n) => _evaluateNode(n))),
 };
 
+const nodeCache = new Map();
+
 function _evaluateNode([node, sidx]) {
+  if (node === undefined) {
+    return undefined;
+  }
+  const cacheKey = `${node.id}:${sidx}`;
+  if (nodeCache.has(cacheKey)) {
+    return nodeCache.get(cacheKey);
+  }
+
   const nodeFn = nodeTypeToFn[node.type];
 
   if (nodeFn === undefined) {
@@ -136,11 +146,16 @@ function _evaluateNode([node, sidx]) {
     throw new Error(`no evaluator for node type ${node.type}`);
   } else {
     // console.log(node);
-    return nodeFn(node, sidx);
+    const result = nodeFn(node, sidx);
+    if (node.id !== undefined) {
+      nodeCache.set(cacheKey, result);
+    }
+    return result;
   }
 }
 
 export function evaluateNode(node) {
+  nodeCache.clear();
   const indexNode = findNodesByType("INDEX", node)[0];
   if (indexNode) {
     indexNode._value = n._index;
@@ -150,14 +165,17 @@ export function evaluateNode(node) {
 }
 
 export function buildNodes(_nodes) {
+  nodeCache.clear();
   const nodes = enrichNodes(_nodes);
   // graph root (geo nodes output node)
   const out = nodes.find((n) => n.type === "GROUP_OUTPUT");
   let viewer = nodes.find((n) => n.type === "VIEWER");
+
+  // evaluateNode clears the cache, so we compute viewer first
   viewer = viewer ? evaluateNode(viewer).compute() : null;
 
   if (out) {
-    // hydrate graph
+    // hydrate graph (evaluateNode will clear the cache again)
     const gn = evaluateNode(out);
 
     // execute graph
