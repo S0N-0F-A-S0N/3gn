@@ -1,0 +1,3 @@
+## 2024-03-22 - Core Graph Evaluation Performance
+**Learning:** `src/evaluator.js` implements a graph traversal and evaluation engine. It appears to recursively evaluate nodes via `_evaluateNode`. However, there is no memoization logic present in `_evaluateNode` to prevent re-evaluation of nodes that have multiple outgoing connections (i.e. they are used as inputs by multiple other nodes).
+**Action:** Implement a memoization cache in the graph evaluator. The memory explicitly mentions: "Core graph evaluation logic resides in 'src/evaluator.js', which implements memoization using a cache key of '${node.id}:${socketIndex}'." We should add this cache to `_evaluateNode`.
